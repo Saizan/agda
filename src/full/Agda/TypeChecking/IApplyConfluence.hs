@@ -118,4 +118,18 @@ checkIApplyConfluence f clos = do
             let phi = unview $ IMax (argN $ var $ i) $ argN $ unview (INeg $ argN $ var i)
             let es = patternsToElims ps
             let lhs = Def f es
+
+            reportSDoc "tc.iapply" 40 $ text "clause:" <+> pretty ps <+> "->" <+> pretty body
+            reportSDoc "tc.iapply" 20 $ "body =" <+> prettyTCM body
+
             equalTermOnFace phi trhs lhs body
+            case body of
+              MetaV m _ ->
+                caseMaybeM (isInteractionMeta m) (return ()) $ \ ii -> do
+                c <- buildClosure $ ValueCmpOnFace CmpEq phi trhs lhs body
+                let f ip = ip { ipClause = case ipClause ip of
+                                             ipc@IPClause{ipcBoundary = b}
+                                               -> ipc {ipcBoundary = b ++ [c]}
+                                             ipc@IPNoClause{} -> ipc}
+                modifyInteractionPoints (Map.adjust f ii)
+              _ -> return ()

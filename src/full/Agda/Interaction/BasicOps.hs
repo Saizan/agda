@@ -168,7 +168,7 @@ redoChecks (Just ii) = do
   ip <- lookupInteractionPoint ii
   case ipClause ip of
     IPNoClause -> return ()
-    IPClause f _ _ -> do
+    IPClause f _ _ _ -> do
       mb <- mutualBlockOf f
       terErrs <- localTC (\ e -> e { envMutualBlock = Just mb }) $ termMutual []
       unless (null terErrs) $ warning $ TerminationIssue terErrs

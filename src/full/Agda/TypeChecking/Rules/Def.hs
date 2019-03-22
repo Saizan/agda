@@ -1064,4 +1064,4 @@ newSection m gtel@(A.GeneralizeTel _ tel) cont = do
 
 -- | Set the current clause number.
 atClause :: QName -> Int -> A.RHS -> TCM a -> TCM a
-atClause name i rhs = localTC $ \ e -> e { envClause = IPClause name i rhs }
+atClause name i rhs = localTC $ \ e -> e { envClause = IPClause name i rhs [] }
