@@ -550,6 +550,12 @@ instance (ToConcrete a c, ToConcrete b d) =>
             ToConcrete (OutputConstraint' a b) (OutputConstraint' c d) where
   toConcrete (OfType' e t) = OfType' <$> toConcrete e <*> toConcreteCtx TopCtx t
 
+prettyConstraints :: [Closure Constraint] -> TCM [OutputForm C.Expr C.Expr]
+prettyConstraints cs = do
+  forM cs $ \ c -> do
+            cl <- reify (PConstr Set.empty c)
+            enterClosure cl abstractToConcrete_
+
 getConstraints :: TCM [OutputForm C.Expr C.Expr]
 getConstraints = liftTCM $ do
     cs <- M.getAllConstraints

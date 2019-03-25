@@ -1483,11 +1483,17 @@ cmd_goal_type_context_and :: Doc -> B.Rewrite -> InteractionId -> Range ->
                              String -> StateT CommandState (TCMT IO) ()
 cmd_goal_type_context_and doc norm ii _ _ = display_info . Info_GoalType =<< do
   lift $ do
+    cs <- do
+      ip <- lookupInteractionPoint ii
+      case ipClause ip of
+        IPClause {ipcBoundary = cs } -> pretty <$> B.prettyConstraints cs
+        IPNoClause -> return empty
     goal <- B.withInteractionId ii $ prettyTypeOfMeta norm ii
     ctx  <- prettyContext norm True ii
     return $ vcat
       [ "Goal:" <+> goal
       , doc
+      , cs
       , text (replicate 60 '\x2014')
       , ctx
       ]
