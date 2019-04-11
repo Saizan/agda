@@ -124,12 +124,23 @@ checkIApplyConfluence f clos = do
 
             equalTermOnFace phi trhs lhs body
             case body of
-              MetaV m _ ->
+              MetaV m es ->
                 caseMaybeM (isInteractionMeta m) (return ()) $ \ ii -> do
+                c' <- do
+                  mv <- lookupMeta m
+                  enterClosure (getMetaInfo mv) $ \ _ -> do
+                  ty <- getMetaType m
+                  tel' <- getContextTelescope
+               --   TelV tel _ <- telViewUpTo (size es) ty
+                  let bd = (MetaV m (teleElims tel' []))
+                  addContext tel $ do
+                    let sigma = raiseS (size tel')
+                    buildClosure $ ValueCmpOnFace CmpEq phi trhs lhs
+                                     (raise (size tel) $ bd)
                 c <- buildClosure $ ValueCmpOnFace CmpEq phi trhs lhs body
                 let f ip = ip { ipClause = case ipClause ip of
                                              ipc@IPClause{ipcBoundary = b}
-                                               -> ipc {ipcBoundary = b ++ [c]}
+                                               -> ipc {ipcBoundary = b ++ [c,c']}
                                              ipc@IPNoClause{} -> ipc}
                 modifyInteractionPoints (Map.adjust f ii)
               _ -> return ()
