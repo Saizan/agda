@@ -1245,7 +1245,7 @@ data IPClause = IPClause
   { ipcQName    :: QName  -- ^ The name of the function.
   , ipcClauseNo :: Int    -- ^ The number of the clause of this function.
   , ipcClause   :: A.RHS  -- ^ The original AST clause rhs.
-  , ipcBoundary :: [Closure Constraint]
+  , ipcBoundary :: [Closure ([(Term,Term)],Constraint)]
   }
   | IPNoClause -- ^ The interaction point is not in the rhs of a clause.
   deriving Data

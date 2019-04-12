@@ -1486,14 +1486,18 @@ cmd_goal_type_context_and doc norm ii _ _ = display_info . Info_GoalType =<< do
     cs <- do
       ip <- lookupInteractionPoint ii
       case ipClause ip of
-        IPClause {ipcBoundary = cs } -> pretty <$> B.prettyConstraints cs
+        IPClause {ipcBoundary = cs } -> do
+          ocs <- B.prettyConstraints (map (fmap snd) cs)
+          forM (zip cs ocs) $ \ (c, o) -> do
+           eqs <- (enterClosure c $ \ z -> TCP.fsep $ flip map (fst z) $ \ (l,r) -> TCP.prettyTCM l TCP.<+> "=" TCP.<+> TCP.prettyTCM r)
+           return $ eqs <+> "|-" <+> pretty o
         IPNoClause -> return empty
     goal <- B.withInteractionId ii $ prettyTypeOfMeta norm ii
     ctx  <- prettyContext norm True ii
     return $ vcat
       [ "Goal:" <+> goal
       , doc
-      , cs
+      , vcat cs
       , text (replicate 60 '\x2014')
       , ctx
       ]

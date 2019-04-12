@@ -5,6 +5,7 @@ module Agda.TypeChecking.IApplyConfluence where
 import Prelude hiding (null, (!!))  -- do not use partial functions like !!
 
 import Control.Monad
+import Control.Arrow (first,second)
 import Control.Monad.Reader
 import Control.Monad.Trans ( lift )
 
@@ -38,7 +39,7 @@ import Agda.TypeChecking.Monad.Builtin
 -- import Agda.TypeChecking.Coverage.Match
 -- import Agda.TypeChecking.Coverage.SplitTree
 
-import Agda.TypeChecking.Conversion (tryConversion, equalType, equalTermOnFace)
+import Agda.TypeChecking.Conversion (tryConversion, equalType, equalTermOnFace, forallFaceMaps)
 -- import Agda.TypeChecking.Datatypes (getConForm)
 -- import {-# SOURCE #-} Agda.TypeChecking.Empty (isEmptyTel)
 -- import Agda.TypeChecking.Free
@@ -103,7 +104,7 @@ checkIApplyConfluence f clos = do
     case cl of
       Clause {clauseBody = Nothing} -> return ()
       Clause {clauseType = Nothing} -> __IMPOSSIBLE__
-      cl@Clause { clauseTel = tel
+      cl@Clause { clauseTel = clTel
                 , namedClausePats = ps
                 , clauseType = Just t
                 , clauseBody = Just body
@@ -115,7 +116,7 @@ checkIApplyConfluence f clos = do
           ps <- normaliseProjP ps
           forM_ (iApplyVars ps) $ \ i -> do
             unview <- intervalUnview'
-            let phi = unview $ IMax (argN $ var $ i) $ argN $ unview (INeg $ argN $ var i)
+            let phi = unview $ IMax (argN $ unview (INeg $ argN $ var i)) $ argN $ var i
             let es = patternsToElims ps
             let lhs = Def f es
 
@@ -124,23 +125,76 @@ checkIApplyConfluence f clos = do
 
             equalTermOnFace phi trhs lhs body
             case body of
-              MetaV m es ->
+              MetaV m es_m ->
                 caseMaybeM (isInteractionMeta m) (return ()) $ \ ii -> do
-                c' <- do
+                cs' <- do
                   mv <- lookupMeta m
                   enterClosure (getMetaInfo mv) $ \ _ -> do
-                  ty <- getMetaType m
-                  tel' <- getContextTelescope
-               --   TelV tel _ <- telViewUpTo (size es) ty
-                  let bd = (MetaV m (teleElims tel' []))
-                  addContext tel $ do
-                    let sigma = raiseS (size tel')
-                    buildClosure $ ValueCmpOnFace CmpEq phi trhs lhs
-                                     (raise (size tel) $ bd)
-                c <- buildClosure $ ValueCmpOnFace CmpEq phi trhs lhs body
+                  -- ty <- getMetaType m
+                  mTel <- getContextTelescope
+                  -- TODO extend telescope to handle extra elims
+                  unless (size mTel == size es_m) $ reportSDoc "tc.iapply.ip" 20 $ "funny number of elims"
+                  addContext clTel $ do
+                    forallFaceMaps phi __IMPOSSIBLE__ $ \ alpha -> do
+                    -- TelV tel _ <- telViewUpTo (size es) ty
+                    reportSDoc "tc.iapply.ip" 40 $ "i0S =" <+> pretty alpha
+                    es <- reduce (alpha `applySubst` es)
+                    let
+                        idG = raise (size clTel) $ (teleElims mTel [])
+                    reportSDoc "tc.iapply.ip" 40 $ "cxt1 =" <+> (prettyTCM =<< getContextTelescope)
+                    reportSDoc "tc.iapply.ip" 40 $ prettyTCM $ alpha `applySubst` ValueCmpOnFace CmpEq phi trhs lhs (MetaV m idG)
+                    unifyElims (teleElims mTel []) (alpha `applySubst` es_m) $ \ sigma eqs -> do
+                    reportSDoc "tc.iapply.ip" 40 $ "cxt2 =" <+> (prettyTCM =<< getContextTelescope)
+                    reportSDoc "tc.iapply.ip" 40 $ "sigma =" <+> pretty sigma
+                    reportSDoc "tc.iapply.ip" 20 $ "eqs =" <+> prettyTCM eqs
+                    buildClosure $ (eqs
+                                   , sigma `applySubst`
+                                       (ValueCmp CmpEq (alpha `applySubst` trhs) (Def f es) (alpha `applySubst` MetaV m es_m)))
                 let f ip = ip { ipClause = case ipClause ip of
                                              ipc@IPClause{ipcBoundary = b}
-                                               -> ipc {ipcBoundary = b ++ [c,c']}
+                                               -> ipc {ipcBoundary = b ++ cs'}
                                              ipc@IPNoClause{} -> ipc}
                 modifyInteractionPoints (Map.adjust f ii)
               _ -> return ()
+
+
+-- | current context is of the form Γ.Δ
+unifyElims :: Elims
+              -- ^ variables to keep   Γ ⊢ x_n .. x_0 : Γ
+           -> Elims
+              -- ^ variables to solve  Γ.Δ ⊢ es : Γ
+           -> (Substitution -> [(Term,Term)] -> TCM a)
+              -- Γ.Δ' ⊢ σ : Γ.Δ
+              -- Γ.Δ' new current context.
+              -- Γ.Δ' ⊢ [(x = u)]
+              -- Γ.Δ', [(x = u)] ⊢ id_g = es[σ] : Γ
+           -> TCM a
+unifyElims idg es k | Just vs <- allApplyElims idg
+                    , Just ts <- allApplyElims es = do
+                      dom <- getContext 
+                      let (binds' , eqs' ) = candidate (map unArg vs) (map unArg ts)
+                          (binds'', eqss') =
+                            unzip $ map (\ (j,t:ts) -> ((j,t),map (,var j) ts)) $ Map.toList $ Map.fromListWith (++) (map (second (:[])) binds')
+                          cod   = codomain s (map fst binds) dom
+                          binds = map (second (raise (size cod - size vs))) binds''
+                          eqs   = map (first  (raise $ size dom - size vs)) $ eqs' ++ concat eqss'
+                          s     = bindS binds
+                      updateContext s (codomain s (map fst binds)) $ do
+                      k s (s `applySubst` eqs)
+                  | otherwise = __IMPOSSIBLE__
+  where
+    candidate :: [Term] -> [Term] -> ([(Nat,Term)],[(Term,Term)])
+    candidate (i:is) (Var j []:ts) = first ((j,i):) (candidate is ts)
+    candidate (i:is) (t:ts)        = second ((i,t):) (candidate is ts)
+    candidate [] [] = ([],[])
+    candidate _ _ = __IMPOSSIBLE__
+
+
+    bindS binds = parallelS (for [0..maximum (-1:map fst binds)] $ (\ i -> fromMaybe (deBruijnVar i) (List.lookup i binds)))
+
+    codomain :: Substitution
+             -> [Nat] -- ^ support
+             -> Context -> Context
+    codomain s vs cxt = map snd $ filter (\ (i,c) -> i `List.notElem` vs) $ zip [0..] cxt'
+     where
+      cxt' = zipWith (\ n d -> dropS n s `applySubst` d) [1..] cxt
