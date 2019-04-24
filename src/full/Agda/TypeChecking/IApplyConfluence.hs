@@ -111,7 +111,7 @@ checkIApplyConfluence f clos = do
                 } -> setCurrentRange (getRange f) $ do
           let
             trhs = unArg t
-          reportSDoc "tc.cover.iapply" 40 $ "tel =" <+> prettyTCM tel
+          reportSDoc "tc.cover.iapply" 40 $ "tel =" <+> prettyTCM clTel
           reportSDoc "tc.cover.iapply" 40 $ "ps =" <+> pretty ps
           ps <- normaliseProjP ps
           forM_ (iApplyVars ps) $ \ i -> do
