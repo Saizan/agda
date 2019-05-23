@@ -534,9 +534,9 @@ primIdJ = do
      [la,lc,a,x,c,d,y,eq] -> do
        seq    <- reduceB' eq
        cview <- conidView'
-       case cview $ unArg $ ignoreBlocking $ seq of
-         (Def q [Apply la,Apply a,Apply x,Apply y,Apply phi,Apply p])
-           | Just q == conidn, Just comp <- mcomp -> do
+       case cview (unArg x) $ unArg $ ignoreBlocking $ seq of
+         Just (phi,p)
+           | Just comp <- mcomp -> do
           redReturn $ runNames [] $ do
              [lc,c,d,la,a,x,y,phi,p] <- mapM (open . unArg) [lc,c,d,la,a,x,y,phi,p]
              let w i = do
@@ -585,8 +585,8 @@ primIdElim' = do
       [a,c,bA,x,bC,f,y,p] -> do
         sp <- reduceB' p
         cview <- conidView'
-        case cview $ unArg $ ignoreBlocking sp of
-          Def q [Apply _a, Apply _bA, Apply _x, Apply _y, Apply phi , Apply w] -> do
+        case cview (unArg x) $ unArg $ ignoreBlocking sp of
+          Just (phi , w) -> do
             y' <- return $ sin `apply` [a,bA                            ,phi,argN $ unArg y]
             w' <- return $ sin `apply` [a,argN $ path `apply` [a,bA,x,y],phi,argN $ unArg w]
             redReturn $ unArg f `apply` [phi, defaultArg y', defaultArg w']
@@ -703,10 +703,10 @@ primConId' = do
         case view $ unArg $ ignoreBlocking sphi of
           IOne -> do
             reflId <- getTerm builtinConId builtinReflId
-            redReturn $ reflId `apply` [l,bA,x]
+            redReturn $ reflId
           _ -> return $ NoReduction $ map notReduced [l,bA,x,y] ++ [reduced sphi, notReduced p]
-      _ -> __IMPOSSIBLE__  
-  
+      _ -> __IMPOSSIBLE__
+
 primIdFace' :: TCM PrimitiveImpl
 primIdFace' = do
   requireCubical
@@ -723,8 +723,8 @@ primIdFace' = do
         st <- reduceB' t
         mConId <- getName' builtinConId
         cview <- conidView'
-        case cview $ unArg (ignoreBlocking st) of
-          Def q [_,_,_,_, Apply phi,_] | Just q == mConId -> redReturn (unArg phi)
+        case cview (unArg x) $ unArg (ignoreBlocking st) of
+          Just (phi,_) -> redReturn (unArg phi)
           _ -> return $ NoReduction $ map notReduced [l,bA,x,y] ++ [reduced st]
       _ -> __IMPOSSIBLE__
 
@@ -744,8 +744,8 @@ primIdPath' = do
         st <- reduceB' t
         mConId <- getName' builtinConId
         cview <- conidView'
-        case cview $ unArg (ignoreBlocking st) of
-          Def q [_,_,_,_,_,Apply w] | Just q == mConId -> redReturn (unArg w)
+        case cview (unArg x) $ unArg (ignoreBlocking st) of
+          Just (_,w)-> redReturn (unArg w)
           _ -> return $ NoReduction $ map notReduced [l,bA,x,y] ++ [reduced st]
       _ -> __IMPOSSIBLE__
 
@@ -1209,8 +1209,7 @@ primTransHComp cmd ts nelims = do
       unview <- intervalUnview'
       mConId <- getName' builtinConId
       cview <- conidView'
-      let isConId t | Def q _ <- cview t = Just q == mConId
-          isConId _         = False
+      let isConId t = isJust $ cview __DUMMY_TERM__ t
       sa0 <- reduceB' a0
       -- wasteful to compute b even when cheaper checks might fail
       b <- case u of
@@ -1285,7 +1284,7 @@ primTransHComp cmd ts nelims = do
            lam2Abs (Lam _ t) = t
            lam2Abs t         = Abs "y" (raise 1 t `apply` [argN $ var 0])
 
-    compData False _ cmd@DoHComp (IsNot l) (IsNot ps) fsc sphi (Just u) a0 = do
+    compData False _ cmd@DoHComp (IsNot l) (IsNot ps) fsc sphi (Just u') a0 = do
       let getTermLocal = getTerm $ cmdToName cmd ++ " for data types"
 
       let sc = famThing <$> fsc
@@ -1294,22 +1293,23 @@ primTransHComp cmd ts nelims = do
         mz <- getTerm' builtinZero
         ms <- getTerm' builtinSuc
         return $ \ t -> fromMaybe t (constructorForm' mz ms t)
-      su  <- reduceB' u
+--      su  <- reduceB' u
       sa0 <- reduceB' a0
       view   <- intervalView'
       unview <- intervalUnview'
       let f = unArg . ignoreBlocking
           phi = f sphi
-          u = f su
+          u = unArg u'
+--          u = f su
           a0 = f sa0
-          noRed = return $ NoReduction [notReduced l,reduced sc, reduced sphi, reduced su', reduced sa0]
+          noRed = return $ NoReduction [notReduced l,reduced sc, reduced sphi, su', reduced sa0]
             where
               su' = case view phi of
-                     IZero -> notBlocked $ argN $ runNames [] $ do
+                     IZero -> reduced $ notBlocked $ argN $ runNames [] $ do
                                  [l,c] <- mapM (open . unArg) [l,ignoreBlocking sc]
                                  lam "i" $ \ i -> pure tEmpty <#> l
                                                               <#> (ilam "o" $ \ _ -> c)
-                     _     -> su
+                     _     -> notReduced u'
           sameConHead h u = allComponents unview phi u $ \ t ->
             case constrForm t of
               Con h' _ _ -> h == h'
@@ -1317,7 +1317,7 @@ primTransHComp cmd ts nelims = do
 
       case constrForm a0 of
         Con h _ args -> do
-          ifM (not <$> sameConHead h u) noRed $ do
+          ifM (const False <$> sameConHead h u) noRed $ do
             Constructor{ conComp = (cm,_) } <- theDef <$> getConstInfo (conName h)
             case nameOfHComp cm of
               Just hcompD -> redReturn $ Def hcompD [] `apply`
