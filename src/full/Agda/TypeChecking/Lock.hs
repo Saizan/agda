@@ -101,9 +101,14 @@ checkLockedVars t ty lk lk_ty = catchConstraint (CheckLockedVars t ty lk lk_ty) 
 
 -- to use only on lock terms
 isVar :: Term -> TCMT IO (Maybe Int)
-isVar (Var l []) = return $ Just l
 isVar (MetaV{}) = patternViolation
-isVar _ = return $ Nothing
+isVar t =
+  case freeVarsIgnore IgnoreInAnnotations t of
+    fv | IMap.null (flexibleVars fv), [l] <- ISet.toList (rigidVars fv)
+       -> return $ Just l
+       | otherwise -> patternViolation
+-- isVar (Var l []) = return $ Just l
+-- isVar _ = return $ Nothing
 
 isTimeless :: Type -> TCM Bool
 isTimeless t = do
